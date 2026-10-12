@@ -3,7 +3,7 @@ class Pawnix < Formula
 
   desc "Keyboard-first chess client for terminals"
   homepage "https://github.com/a-shygun/Pawnix"
-  version "0.1.0"
+  version "0.1.1"
   url "https://github.com/a-shygun/Pawnix.git", tag: "v#{version}"
   head "https://github.com/a-shygun/Pawnix.git", branch: "main"
   license "MIT"
