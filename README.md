@@ -50,7 +50,7 @@ pawnix
 The formula is in this repository:
 
 ```sh
-brew tap a-shygun/Pawnix https://github.com/a-shygun/Pawnix
+brew trust --formula a-shygun/pawnix/pawnix
 brew install pawnix
 ```
 
