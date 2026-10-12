@@ -1,0 +1,310 @@
+name: Build and publish
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to package
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and smoke-check Python package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Check release tag version
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          python - <<'PY'
+          import os
+          import tomllib
+          from pathlib import Path
+
+          version = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
+          tag = os.environ["RELEASE_TAG"]
+          if tag != f"v{version}":
+              raise SystemExit(f"tag {tag} does not match project version {version}")
+          PY
+
+      - name: Build and validate Python distributions
+        run: |
+          python -m pip install --upgrade build twine
+          python -m build
+          python -m twine check dist/*
+
+      - name: Smoke-check installed wheel
+        run: |
+          python -m venv .smoke-venv
+          .smoke-venv/bin/python -m pip install dist/*.whl
+          .smoke-venv/bin/pawnix --help
+
+      - name: Create source archive
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          version="${RELEASE_TAG#v}"
+          git archive --format=tar --prefix="pawnix-${version}/" HEAD \
+            -o "dist/pawnix-${version}.tar"
+
+      - name: Save Python distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: distributions
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Save source archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: source-archive
+          path: dist/*.tar
+          if-no-files-found: error
+          retention-days: 7
+
+  release_packages:
+    name: Build ${{ matrix.platform }} download
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            platform: linux_amd64
+            deb_arch: amd64
+          - os: ubuntu-22.04-arm
+            platform: linux_arm64
+            deb_arch: arm64
+          - os: macos-15-intel
+            platform: macos_x86_64
+          - os: macos-15
+            platform: macos_arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Build standalone Pawnix command
+        run: |
+          python -m pip install --upgrade pyinstaller
+          python -m pip install .
+          pyinstaller --clean --noconfirm --onefile \
+            --name pawnix \
+            --collect-all chess \
+            --collect-all keyring \
+            --copy-metadata pawnix \
+            --copy-metadata python-chess \
+            --copy-metadata keyring \
+            packaging/entrypoint.py
+          dist/pawnix --help
+
+      - name: Package standalone archive
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          version="${RELEASE_TAG#v}"
+          tar -czf "dist/pawnix_${version}_${PLATFORM}.tar.gz" -C dist pawnix
+
+      - name: Package Debian installer
+        if: runner.os == 'Linux'
+        env:
+          DEB_ARCH: ${{ matrix.deb_arch }}
+          PLATFORM: ${{ matrix.platform }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          version="${RELEASE_TAG#v}"
+          package_root="$(mktemp -d)"
+          install -D -m 755 dist/pawnix "$package_root/usr/bin/pawnix"
+          install -d "$package_root/DEBIAN"
+          cat > "$package_root/DEBIAN/control" <<EOF
+          Package: pawnix
+          Version: ${version}
+          Section: games
+          Priority: optional
+          Architecture: ${DEB_ARCH}
+          Maintainer: Pawnix maintainers
+          Depends: libc6, libncursesw6, libtinfo6
+          Description: Keyboard-first chess client for the terminal
+           Pawnix provides local chess and casual Lichess games in a terminal interface.
+          EOF
+          dpkg-deb --root-owner-group --build \
+            "$package_root" "dist/pawnix_${version}_${PLATFORM}.deb"
+
+      - name: Save platform downloads
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.platform }}
+          path: dist/pawnix_*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish_pypi:
+    name: Publish Python distributions to PyPI
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/pawnix/
+    permissions:
+      actions: read
+      id-token: write
+    steps:
+      - name: Download Python distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: distributions
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  update_homebrew_formula:
+    name: Update the repository Homebrew formula
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: publish_pypi
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Update formula version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          version="${RELEASE_TAG#v}"
+          sed -i "s/^  version \".*\"$/  version \"${version}\"/" Formula/pawnix.rb
+          if git diff --quiet -- Formula/pawnix.rb; then
+            echo "Formula already matches ${RELEASE_TAG}."
+            exit 0
+          fi
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/pawnix.rb
+          git commit -m "Update Homebrew formula to ${version}"
+          git push origin HEAD:main
+
+  create_github_release:
+    name: Create GitHub Release and upload downloads
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    needs: [build, release_packages]
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: Download Python distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: distributions
+          path: release-assets/
+
+      - name: Download source archive
+        uses: actions/download-artifact@v4
+        with:
+          name: source-archive
+          path: release-assets/
+
+      - name: Download platform downloads
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: release-assets/
+          merge-multiple: true
+
+      - name: Generate SHA-256 checksums
+        run: |
+          python - <<'PY'
+          import hashlib
+          from pathlib import Path
+
+          assets = sorted(path for path in Path("release-assets").iterdir() if path.is_file())
+          lines = [
+              f"{hashlib.sha256(asset.read_bytes()).hexdigest()}  {asset.name}"
+              for asset in assets
+          ]
+          (Path("release-assets") / "pawnix_checksums.txt").write_text(
+              "\n".join(lines) + "\n", encoding="utf-8"
+          )
+          PY
+
+      - name: Create release if needed and upload files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
+              --generate-notes \
+              --title "Pawnix ${RELEASE_TAG#v}"
+          fi
+          gh release upload "$RELEASE_TAG" release-assets/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
+
+  update_homebrew_tap:
+    name: Publish Homebrew formula to configured tap
+    if: startsWith(github.ref, 'refs/tags/v') && vars.HOMEBREW_TAP_REPOSITORY != ''
+    needs: [create_github_release, update_homebrew_formula]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Check out Homebrew tap
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.HOMEBREW_TAP_REPOSITORY }}
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Set formula version and publish it to the tap
+        run: |
+          mkdir -p homebrew-tap/Formula
+          cp Formula/pawnix.rb homebrew-tap/Formula/pawnix.rb
+          git -C homebrew-tap config user.name "github-actions[bot]"
+          git -C homebrew-tap config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C homebrew-tap add Formula/pawnix.rb
+          if ! git -C homebrew-tap diff --cached --quiet; then
+            git -C homebrew-tap commit -m "Update Pawnix formula"
+            git -C homebrew-tap push
+          fi
