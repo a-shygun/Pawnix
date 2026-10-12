@@ -34,7 +34,7 @@ supported. Color support is optional; a no-color fallback is included.
 Use `pipx` to install Pawnix in an isolated environment:
 
 ```sh
-pipx install pawnix
+pip install pawnix
 pawnix
 ```
 
