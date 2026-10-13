@@ -187,37 +187,6 @@ packaging/nix/           Nix flake and package definition
 .github/workflows/       CI and tag-based release automation
 ```
 
-## Project checklist
-
-### Implemented
-
-- [x] Local standard chess with legal move handling, clocks, review, and PGN
-      save/load.
-- [x] Lichess sign-in, AI practice, casual matchmaking, challenges, premoves,
-      and draw actions.
-- [x] Responsive terminal board, themes, zoom, mouse input, and keyboard
-      shortcuts.
-- [x] CI plus tag-based PyPI publishing and GitHub release assets; Homebrew
-      formula and Nix packaging are included.
-
-### Good next steps
-
-- [ ] Add automated tests for chess flows, terminal layout, and Lichess API
-      responses.
-- [ ] Recover cleanly from interrupted online-game connections and support
-      Board API draw claims.
-- [ ] Improve accessibility options and terminal-specific color/layout
-      handling.
-- [ ] Explore local UCI engine analysis as a separate offline feature.
-
-## Release process
-
-Set the version in `pyproject.toml`, push a matching tag such as `v0.1.0`, and
-GitHub Actions builds the Python packages, platform archives, Linux `.deb`
-installers, checksums, and GitHub release. The workflow publishes to PyPI and
-updates the Homebrew formula; publishing to a separate Homebrew tap is optional
-and uses repository secrets. Nix users can build from `packaging/nix/`.
-
 ## Repository history
 
 [![Pawnix star history](https://app.repohistory.com/api/svg?repo=a-shygun/Pawnix&type=Date&background=0D1117&color=6278f8)](https://app.repohistory.com/star-history)
