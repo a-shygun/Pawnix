@@ -1,8 +1,7 @@
 # Pawnix
 
 [![CI](https://github.com/a-shygun/Pawnix/actions/workflows/ci.yml/badge.svg)](https://github.com/a-shygun/Pawnix/actions/workflows/ci.yml)
-[![PyPI](https://img.shields.io/pypi/v/pawnix)](https://pypi.org/project/pawnix/)
-[![Python](https://img.shields.io/pypi/pyversions/pawnix)](https://pypi.org/project/pawnix/)
+[![Python](https://img.shields.io/pypi/pyversions/Terrascope)](https://pypi.org/project/Terrascope/)
 [![License](https://img.shields.io/github/license/a-shygun/Pawnix)](LICENSE)
 
 ![Pawnix terminal chess demo](assets/pawnix.gif)
