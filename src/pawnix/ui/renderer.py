@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
-import curses
+import base64
 import colorsys
+import curses
+import os
+import secrets
+import struct
+import sys
 import time
 import unicodedata
 from dataclasses import dataclass
+from importlib.resources import files
 
 import chess
 
@@ -77,7 +83,7 @@ class BoardRenderer(LobbyRendererMixin, ModalRendererMixin):
         self.theme_button_bounds: tuple[int, int, int] | None = None
         self.rain_button_bounds: tuple[int, int, int] | None = None
         self.gaps_button_bounds: tuple[int, int, int] | None = None
-        self.coordinates_button_bounds: tuple[int, int, int] | None = None
+        self.piece_button_bounds: tuple[int, int, int] | None = None
         self.surrender_button_bounds: tuple[int, int, int] | None = None
         self.result_modal_open = False
         self.result_button_bounds: tuple[tuple[int, int, int], tuple[int, int, int]] | None = None
@@ -103,7 +109,12 @@ class BoardRenderer(LobbyRendererMixin, ModalRendererMixin):
         self.rain_color_pairs = False
         self.rain_enabled = True
         self.board_gaps_enabled = False
-        self.coordinates_enabled = True
+        self.piece_style = "art"
+        self.image_protocol = self._detect_image_protocol()
+        self._piece_image_id_base = secrets.randbelow(2**32 - 16) + 1
+        self._sent_piece_images: set[int] = set()
+        self._placed_piece_images: list[tuple[int, int]] = []
+        self._pending_piece_images: list[tuple[int, int, int, int, int, chess.Piece]] = []
         self.legal_pair = 4
         self.legal_piece_pairs = False
         self.last_move_pair = 4
@@ -126,6 +137,70 @@ class BoardRenderer(LobbyRendererMixin, ModalRendererMixin):
         except curses.error:
             self.color_enabled = False
             self.rich_colors = False
+
+    @staticmethod
+    def _detect_image_protocol() -> str | None:
+        """Return kitty graphics when the terminal advertises that protocol."""
+        if (
+            os.environ.get("KITTY_WINDOW_ID")
+            or os.environ.get("TERM", "").startswith("xterm-kitty")
+            or os.environ.get("TERM_PROGRAM") in ("WezTerm", "ghostty")
+            or os.environ.get("GHOSTTY_RESOURCES_DIR")
+        ):
+            return "kitty"
+        return None
+
+    def cycle_piece_style(self) -> str:
+        styles = ("art", "unicode", "png") if self.image_protocol else ("art", "unicode")
+        self.piece_style = styles[(styles.index(self.piece_style) + 1) % len(styles)]
+        return self.piece_style
+
+    def _begin_graphics_frame(self) -> None:
+        if self.image_protocol and self._placed_piece_images:
+            commands = "".join(
+                f"\x1b_Ga=d,d=i,i={image_id},p={placement_id}\x1b\\"
+                for image_id, placement_id in self._placed_piece_images
+            )
+            try:
+                sys.stdout.write(commands)
+                sys.stdout.flush()
+            except OSError:
+                pass
+        self._placed_piece_images.clear()
+        self._pending_piece_images.clear()
+
+    def _draw_graphic_pieces(self) -> None:
+        if self.piece_style != "png" or self.image_protocol != "kitty":
+            return
+        output: list[str] = []
+        placed: list[tuple[int, int]] = []
+        for placement_id, x, y, columns, rows, piece in self._pending_piece_images:
+            image_id = self._piece_image_id_base + (6 if piece.color else 0) + piece.piece_type
+            if image_id not in self._sent_piece_images:
+                color = "white" if piece.color else "black"
+                piece_letter = piece.symbol().lower()
+                png = files("pawnix").joinpath(
+                    "assets", "pieces", f"{color}-{piece_letter}.png"
+                ).read_bytes()
+                width, height = struct.unpack(">II", png[16:24])
+                encoded = base64.b64encode(png).decode("ascii")
+                output.append(
+                    f"\x1b_Ga=t,f=100,t=d,i={image_id},s={width},v={height},q=2;"
+                    f"{encoded}\x1b\\"
+                )
+                self._sent_piece_images.add(image_id)
+            output.append(f"\x1b[{y + 1};{x + 1}H")
+            output.append(
+                f"\x1b_Ga=p,i={image_id},p={placement_id},c={columns},r={rows},q=2\x1b\\"
+            )
+            placed.append((image_id, placement_id))
+        if output:
+            try:
+                sys.stdout.write("".join(output))
+                sys.stdout.flush()
+                self._placed_piece_images = placed
+            except OSError:
+                pass
 
     def select_theme(self, index: int | None = None) -> None:
         """Commit the currently previewed theme as the active selection."""
@@ -323,6 +398,7 @@ class BoardRenderer(LobbyRendererMixin, ModalRendererMixin):
         premove_color: chess.Color | None = None,
         premove_move: chess.Move | None = None,
     ) -> None:
+        self._begin_graphics_frame()
         try:
             screen.erase()
         except curses.error:
@@ -341,7 +417,7 @@ class BoardRenderer(LobbyRendererMixin, ModalRendererMixin):
         self.theme_button_bounds = None
         self.surrender_button_bounds = None
         self.gaps_button_bounds = None
-        self.coordinates_button_bounds = None
+        self.piece_button_bounds = None
         self.game_theme_rows = ()
         height, width = screen.getmaxyx()
         layout = self._make_layout(height, width)
@@ -411,8 +487,7 @@ class BoardRenderer(LobbyRendererMixin, ModalRendererMixin):
                     if move.from_square == game.selected
                 }
         self._draw_squares(screen, layout, game, view_board)
-        if self.coordinates_enabled:
-            self._draw_coordinates(screen, layout)
+        self._draw_coordinates(screen, layout)
         self._draw_annotations(screen, layout)
         self._draw_panel(screen, layout, game, panel_y, panel_height, view_ply)
         self._draw_game_clocks(screen, layout, game, white_name, black_name, orientation)
@@ -430,6 +505,7 @@ class BoardRenderer(LobbyRendererMixin, ModalRendererMixin):
         elif self.help_modal_open:
             self._draw_help_modal(screen, version)
         self._safe_refresh(screen)
+        self._draw_graphic_pieces()
 
 
     def _draw_piece_rain(
@@ -641,7 +717,7 @@ class BoardRenderer(LobbyRendererMixin, ModalRendererMixin):
                 if piece:
                     self._draw_piece(
                         screen, x, y, layout.cell_width, layout.cell_height,
-                        layout.piece_size, piece,
+                        layout.piece_size, square, piece,
                         light_square, is_check or is_selected or is_legal_target or (
                             is_last_move and self.last_move_piece_pairs
                         ), square_style, pair,
@@ -687,13 +763,17 @@ class BoardRenderer(LobbyRendererMixin, ModalRendererMixin):
         width: int,
         height: int,
         piece_size: str,
+        square: chess.Square,
         piece: chess.Piece,
         light_square: bool,
         selected: bool,
         square_style: int,
         highlight_pair: int = 4,
     ) -> None:
-        if piece_size == "small":
+        if self.piece_style == "png" and self.image_protocol == "kitty":
+            self._pending_piece_images.append((square + 1, x, y, width, height, piece))
+            return
+        if self.piece_style == "unicode" or piece_size == "small":
             lines = (piece.unicode_symbol(),)
         else:
             lines = _PIECE_GLYPHS[(piece.piece_type, piece_size)]
@@ -802,11 +882,16 @@ class BoardRenderer(LobbyRendererMixin, ModalRendererMixin):
         control_height = 17 if self.theme_menu_open else 8
         self._draw_border(screen, layout.panel_x, panel_y, layout.panel_width,
                           control_height, "CONTROLS")
+        piece_label = {
+            "art": "[PIECE ART]",
+            "unicode": "[PIECE UNI]",
+            "png": "[PIECE PNG]",
+        }[self.piece_style]
         control_labels = (
             ("[BACK B]", "[GUIDE ?]"),
             ("[SIDE V]", "[THEME T]"),
             ("[RAIN R]", "[RESIGN S]"),
-            ("[GAP G]", "[COORDS C]"),
+            ("[GAP G]", piece_label),
         )
         column_width = (layout.panel_width - 2) // 2
         column_starts = (layout.panel_x + 1, layout.panel_x + 1 + column_width)
@@ -819,8 +904,6 @@ class BoardRenderer(LobbyRendererMixin, ModalRendererMixin):
                 attrs = curses.A_BOLD | curses.A_UNDERLINE
                 if label == "[RAIN R]" and not self.rain_enabled:
                     attrs |= curses.A_DIM
-                if label == "[COORDS C]" and not self.coordinates_enabled:
-                    attrs |= curses.A_DIM
                 if label == "[GAP G]" and not self.board_gaps_enabled:
                     attrs |= curses.A_DIM
                 self._addstr(screen, row_y, left, label, self._color(1, attrs))
@@ -832,7 +915,7 @@ class BoardRenderer(LobbyRendererMixin, ModalRendererMixin):
         self.rain_button_bounds = bounds[(2, 0)]
         self.surrender_button_bounds = bounds[(2, 1)]
         self.gaps_button_bounds = bounds[(3, 0)]
-        self.coordinates_button_bounds = bounds[(3, 1)]
+        self.piece_button_bounds = bounds[(3, 1)]
 
         self.game_theme_rows = ()
         if self.theme_menu_open:

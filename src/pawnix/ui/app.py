@@ -146,6 +146,7 @@ class PawnixApp(LichessFlowMixin):
                 curses.mousemask(0)
             except curses.error:
                 pass
+            self.renderer._begin_graphics_frame()
 
     def _main(self, screen: "curses._CursesWindow") -> None:
         screen.keypad(True)
@@ -338,7 +339,11 @@ class PawnixApp(LichessFlowMixin):
             elif key in (ord("g"), ord("G")) and not self.game.input_buffer:
                 self.renderer.board_gaps_enabled = not self.renderer.board_gaps_enabled
             elif key in (ord("c"), ord("C")) and not self.game.input_buffer:
-                self.renderer.coordinates_enabled = not self.renderer.coordinates_enabled
+                style = self.renderer.cycle_piece_style()
+                style_name = {
+                    "art": "art pieces", "unicode": "Unicode pieces", "png": "PNG pieces",
+                }[style]
+                self.game.status = f"Showing {style_name}."
             elif key in (ord("q"), ord("Q")) and not self.game.input_buffer:
                 self.renderer.exit_confirm_open = True
             elif key in (ord("u"), ord("U")) and not self.game.input_buffer:
@@ -867,13 +872,17 @@ class PawnixApp(LichessFlowMixin):
         if gaps_button and mouse_y == gaps_button[0] and gaps_button[1] <= mouse_x <= gaps_button[2]:
             self.renderer.board_gaps_enabled = not self.renderer.board_gaps_enabled
             return
-        coordinates_button = self.renderer.coordinates_button_bounds
+        piece_button = self.renderer.piece_button_bounds
         if (
-            coordinates_button
-            and mouse_y == coordinates_button[0]
-            and coordinates_button[1] <= mouse_x <= coordinates_button[2]
+            piece_button
+            and mouse_y == piece_button[0]
+            and piece_button[1] <= mouse_x <= piece_button[2]
         ):
-            self.renderer.coordinates_enabled = not self.renderer.coordinates_enabled
+            style = self.renderer.cycle_piece_style()
+            style_name = {
+                "art": "art pieces", "unicode": "Unicode pieces", "png": "PNG pieces",
+            }[style]
+            self.game.status = f"Showing {style_name}."
             return
         nav = self.renderer.move_nav_bounds
         if nav and mouse_y == nav[0]:

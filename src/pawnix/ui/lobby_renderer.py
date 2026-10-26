@@ -28,6 +28,7 @@ class LobbyRendererMixin:
         account_name: str = "",
     ) -> None:
         """Draw centered setup panels over an animated chess-piece rain."""
+        self._begin_graphics_frame()
         try:
             screen.erase()
         except curses.error:

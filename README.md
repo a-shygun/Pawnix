@@ -19,14 +19,16 @@ username challenges. It combines a responsive curses interface with
   draw offers through the official Board API.
 - Browser-based Lichess sign-in using OAuth with PKCE. Credentials are stored
   in the operating system's credential store.
-- Fifteen preset board themes, terminal-resizing piece sizes, zoom, coordinates,
-  move review, captured pieces, and board annotations.
+- Fifteen preset board themes, terminal-resizing piece sizes, zoom, always-on
+  coordinates, move review, captured pieces, and board annotations.
 - Public Lichess profile lookup without signing in.
 
 ## Installation
 
-Pawnix requires Python 3.10 or newer and a UTF-8 terminal. macOS and Linux are
-supported. Color support is optional; a no-color fallback is included.
+Pawnix requires Python 3.10 or newer and a UTF-8 terminal. macOS, Linux, and
+Windows are supported. On Windows, installation includes the `windows-curses`
+compatibility package. Color support is optional; a no-color fallback is
+included.
 
 ### PyPI
 
@@ -34,6 +36,13 @@ Use `pipx` to install Pawnix in an isolated environment:
 
 ```sh
 pip install pawnix
+pawnix
+```
+
+On Windows, install with `uv`:
+
+```powershell
+uv tool install pawnix
 pawnix
 ```
 
@@ -51,6 +60,15 @@ The formula is in this repository:
 ```sh
 brew trust --formula a-shygun/pawnix/pawnix
 brew install pawnix
+```
+
+### Arch Linux (AUR)
+
+Pawnix is also available in the [Arch User Repository](https://aur.archlinux.org/packages/pawnix).
+Install it with an AUR helper, for example:
+
+```sh
+yay -S pawnix
 ```
 
 ### Nix
@@ -121,11 +139,15 @@ pawnix profile DrNykterstein --json
 | `T` / `t` | Cycle themes forward / backward |
 | `V` | Move the side panel |
 | `G` | Toggle gaps between board squares |
-| `C` | Toggle board coordinates |
+| `C` | Cycle piece styles (art, Unicode, and PNG in supported terminals) |
 | `R` | Toggle piece rain |
 | `?` | Open the quick guide |
 | `Q` in a match | Open the forfeit-and-exit confirmation |
 | Right-click / right-drag | Circle a square / draw an arrow |
+
+PNG piece icons use the Kitty graphics protocol and are enabled automatically
+in Kitty, WezTerm, and Ghostty. Other terminals can cycle between the art and
+Unicode styles.
 
 The in-game guide lists controls and shortcuts. Local games also support
 restart, undo/redo, pause, draw offers and claims, autosave/resume, and PGN

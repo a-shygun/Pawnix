@@ -13,6 +13,7 @@ authors = [{ name = "Pawnix contributors" }]
 dependencies = [
   "keyring>=25.6",
   "python-chess>=1.999",
+  "windows-curses>=2.3; sys_platform == 'win32'",
 ]
 keywords = ["chess", "lichess", "terminal", "tui"]
 classifiers = [
@@ -38,3 +39,6 @@ Issues = "https://github.com/a-shygun/Pawnix/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+pawnix = ["assets/pieces/*.png"]
